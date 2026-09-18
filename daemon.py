@@ -132,7 +132,10 @@ class BrowserDaemon:
             return {"ok": True, "version": VERSION}
         if method is None:
             return {"error": f"unknown command: {name} (version {VERSION})"}
-        return method(cmd) or {"ok": True}
+        try:
+            return method(cmd) or {"ok": True}
+        except Exception as e:
+            return self._friendly_error(e, name, cmd if isinstance(cmd, dict) else {})
 
     def cmd_stop(self, _):
         threading.Thread(target=self._shutdown, daemon=True).start()
@@ -247,6 +250,36 @@ class BrowserDaemon:
             return el.evaluate(JS["DESCRIBE"])
         except Exception:
             return None
+
+    def _friendly_error(self, e, name, cmd):
+        """Turn Playwright's multi-line dumps into one actionable line."""
+        msg = (str(e).strip().splitlines() or [""])[0]
+        uid = cmd.get("uid")
+        desc = ""
+        if uid:
+            try:
+                info = self._describe(uid)
+                if info:
+                    label = f'{info["tag"]} "{info["name"]}"' if info.get("name") else info["tag"]
+                    desc = f' (that uid resolves to {label})'
+            except Exception:
+                pass
+        if "Element is not an <input>" in msg:
+            verb = {"fill": "fill", "select": "select an option in",
+                    "check": "check", "uncheck": "uncheck"}.get(name, "act on")
+            return {"error": f"cannot {verb} {uid}{desc}: it is not an editable field — "
+                             f"snapshot again and target a textbox, combobox, or checkbox"}
+        if "Timeout" in type(e).__name__ or msg.startswith("Timeout"):
+            m = re.search(r"Timeout (\d+)ms", msg)
+            ms = f"{m.group(1)}ms" if m else "the action timeout"
+            return {"error": f"{name} timed out after {ms} — the element never became "
+                             f"actionable; re-snapshot and check the page state"}
+        if "Unknown key" in msg:
+            return {"error": f"unknown key {cmd.get('key')!r} — use names like Enter, Tab, "
+                             f"Escape, ArrowDown, or combos like Control+a"}
+        if name == "eval":
+            return {"error": f"JS error: {msg or type(e).__name__}"}
+        return {"error": f"{name} failed: {msg or type(e).__name__}"}
 
     def _with_target(self, uid):
         resp = {"ok": True}
