@@ -1,0 +1,24 @@
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python engine compiles
+        run: python3 -m py_compile browser.py cli.py daemon.py snapshot_js.py
+
+      - name: Page JS parses
+        run: node --check snapshot.js
+
+      - name: Installer is valid bash
+        run: bash -n freebuff-browser-skill/install.sh
+
+      - name: Giveaway matches the live engine
+        run: python3 .github/scripts/check_giveaway.py
